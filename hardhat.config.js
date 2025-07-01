@@ -1,6 +1,6 @@
 require("@nomicfoundation/hardhat-ethers");
 require("dotenv").config();
-require("@nomicfoundation/hardhat-verify"); // Añadir esta línea
+require("@nomicfoundation/hardhat-verify");
 
 module.exports = {
   solidity: {
@@ -16,7 +16,7 @@ module.exports = {
       accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
   },
-  etherscan: { // Añadir este bloque
+  etherscan: {
     apiKey: {
       sepolia: process.env.ETHERSCAN_API_KEY,
     },

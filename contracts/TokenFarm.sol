@@ -17,13 +17,16 @@ contract TokenFarm {
 
     uint256 public totalStakingBalance;
 
+    uint256 public accruedRewardPerShare;
+    uint256 public lastRewardBlock;
+
     uint256 public withdrawalFeeBasisPoints = 100;
     uint256 public accumulatedFees;
 
     struct Staker {
         uint256 stakingBalance;
-        uint256 checkpoint;
         uint256 pendingRewards;
+        uint256 rewardDebt;
         bool hasStaked;
         bool isStaking;
     }
@@ -44,16 +47,18 @@ contract TokenFarm {
     event Deposit(address indexed user, uint256 amount);
     event Withdraw(address indexed user, uint256 amount, uint256 fee);
     event RewardsClaimed(address indexed user, uint256 amount);
-    event RewardsDistributed();
+    event RewardsUpdated(uint256 newAccruedRewardPerShare);
 
     constructor(DAppToken _dappToken, LPToken _lpToken) {
         owner = msg.sender;
         dappToken = _dappToken;
         lpToken = _lpToken;
+        lastRewardBlock = block.number;
     }
 
     function setRewardPerBlock(uint256 _newReward) external onlyOwner {
         require(_newReward >= rewardPerBlockMin && _newReward <= rewardPerBlockMax, "Recompensa fuera del rango");
+        updateAccruedRewards();
         rewardPerBlock = _newReward;
     }
 
@@ -66,16 +71,18 @@ contract TokenFarm {
         require(accumulatedFees > 0, "No hay fees para retirar");
         uint256 amount = accumulatedFees;
         accumulatedFees = 0;
-        dappToken.transfer(owner, amount);
+        bool sent = dappToken.transfer(owner, amount);
+        require(sent, "Transferencia de DAppToken para fees fallo");
     }
 
     function deposit(uint256 _amount) external {
         require(_amount > 0, "Monto debe ser mayor a 0");
         Staker storage user = stakers[msg.sender];
-        distributeRewards(msg.sender);
 
-        bool sent = lpToken.transferFrom(msg.sender, address(this), _amount);
-        require(sent, "Transferencia LPToken fallo");
+        updateAccruedRewards();
+        if (user.stakingBalance > 0) {
+            user.pendingRewards += (user.stakingBalance * accruedRewardPerShare) / 1e18 - user.rewardDebt;
+        }
 
         if (!user.hasStaked) {
             user.hasStaked = true;
@@ -85,9 +92,10 @@ contract TokenFarm {
         user.stakingBalance += _amount;
         totalStakingBalance += _amount;
         user.isStaking = true;
-        if (user.checkpoint == 0) {
-            user.checkpoint = block.number;
-        }
+        user.rewardDebt = (user.stakingBalance * accruedRewardPerShare) / 1e18;
+
+        bool sent = lpToken.transferFrom(msg.sender, address(this), _amount);
+        require(sent, "Transferencia LPToken fallo");
 
         emit Deposit(msg.sender, _amount);
     }
@@ -96,12 +104,16 @@ contract TokenFarm {
         Staker storage user = stakers[msg.sender];
         require(user.stakingBalance > 0, "No tienes tokens para retirar");
 
-        distributeRewards(msg.sender);
+        updateAccruedRewards();
+        if (user.stakingBalance > 0) {
+            user.pendingRewards += (user.stakingBalance * accruedRewardPerShare) / 1e18 - user.rewardDebt;
+        }
 
         uint256 amountToWithdraw = user.stakingBalance;
         user.stakingBalance = 0;
         user.isStaking = false;
         totalStakingBalance -= amountToWithdraw;
+        user.rewardDebt = (user.stakingBalance * accruedRewardPerShare) / 1e18;
 
         bool sent = lpToken.transfer(msg.sender, amountToWithdraw);
         require(sent, "Transferencia LPToken fallo");
@@ -109,9 +121,14 @@ contract TokenFarm {
         emit Withdraw(msg.sender, amountToWithdraw, 0);
     }
 
-    function claimRewards() external onlyStaker { 
+    function claimRewards() external onlyStaker {
         Staker storage user = stakers[msg.sender];
-        distributeRewards(msg.sender);
+
+        updateAccruedRewards();
+        if (user.stakingBalance > 0) {
+            user.pendingRewards += (user.stakingBalance * accruedRewardPerShare) / 1e18 - user.rewardDebt;
+        }
+        user.rewardDebt = (user.stakingBalance * accruedRewardPerShare) / 1e18;
 
         uint256 reward = user.pendingRewards;
         require(reward > 0, "No tienes recompensas pendientes");
@@ -122,31 +139,38 @@ contract TokenFarm {
         user.pendingRewards = 0;
         accumulatedFees += fee;
 
-        dappToken.transfer(msg.sender, rewardAfterFee);
+        bool sent = dappToken.transfer(msg.sender, rewardAfterFee);
+        require(sent, "Transferencia de DAppToken de recompensa fallo");
 
         emit RewardsClaimed(msg.sender, rewardAfterFee);
     }
 
-    function distributeRewardsAll() external onlyOwner {
-        for (uint256 i = 0; i < stakerAddresses.length; i++) {
-            address stakerAddr = stakerAddresses[i];
-            if (stakers[stakerAddr].isStaking) {
-                distributeRewards(stakerAddr);
-            }
-        }
-        emit RewardsDistributed();
-    }
-
-    function distributeRewards(address beneficiary) private {
-        Staker storage user = stakers[beneficiary];
-        if (block.number <= user.checkpoint || totalStakingBalance == 0) {
+    function updateAccruedRewards() private {
+        if (totalStakingBalance == 0) {
+            lastRewardBlock = block.number;
             return;
         }
-        uint256 blocksPassed = block.number - user.checkpoint;
-        uint256 share = (user.stakingBalance * 1e18) / totalStakingBalance;
-        uint256 reward = (rewardPerBlock * blocksPassed * share) / 1e18;
+        uint256 blocksPassed = block.number - lastRewardBlock;
+        if (blocksPassed == 0) {
+            return;
+        }
 
-        user.pendingRewards += reward;
-        user.checkpoint = block.number;
+        uint256 rewardsThisPeriod = rewardPerBlock * blocksPassed;
+        accruedRewardPerShare += (rewardsThisPeriod * 1e18) / totalStakingBalance;
+        lastRewardBlock = block.number;
+        emit RewardsUpdated(accruedRewardPerShare);
+    }
+
+    function getPendingRewards(address _staker) public view returns (uint256) {
+        Staker storage user = stakers[_staker];
+        uint256 currentAccruedRewardPerShare = accruedRewardPerShare;
+
+        if (totalStakingBalance > 0 && block.number > lastRewardBlock) {
+            uint256 blocksPassed = block.number - lastRewardBlock;
+            uint256 rewardsThisPeriod = rewardPerBlock * blocksPassed;
+            currentAccruedRewardPerShare += (rewardsThisPeriod * 1e18) / totalStakingBalance;
+        }
+
+        return (user.stakingBalance * currentAccruedRewardPerShare) / 1e18 - user.rewardDebt + user.pendingRewards;
     }
 }

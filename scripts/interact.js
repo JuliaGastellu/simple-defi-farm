@@ -1,92 +1,88 @@
-const { ethers } = require("hardhat");
-
-const DAPP_TOKEN_ADDRESS = "0x811d593c2aE407F8BA307a6d8205F726EC4744C6";
-const LP_TOKEN_ADDRESS = "0xa1d0F293ccD3bD2D920baDFB3Bc468dB02FCce3c";
-const TOKEN_FARM_ADDRESS = "0x40171a8a9b24C50acE88bef1a913a4e2322c6036";
+const hre = require("hardhat");
 
 async function main() {
-    const [deployer] = await ethers.getSigners();
+  const [deployer] = await hre.ethers.getSigners();
 
-    console.log("Interactuando con contratos desde la cuenta:", deployer.address);
-    console.log("Balance de cuenta:", ethers.formatEther(await ethers.provider.getBalance(deployer.address)), "ETH");
+  
+  const DAPP_TOKEN_ADDRESS = "0x373642fD816AB3bc81fd531e8C503192e744d0f3"; 
+  const LP_TOKEN_ADDRESS = "0x2c61927Ca09f990EeDd99ec64e29E1Bc87Cb3a01";   
+  const TOKEN_FARM_ADDRESS = "0x28831620D7e3878866f1CE0F1e5390A0139f9E6A"; 
 
-    const dappToken = await ethers.getContractAt("DAppToken", DAPP_TOKEN_ADDRESS);
-    const lpToken = await ethers.getContractAt("LPToken", LP_TOKEN_ADDRESS);
-    const tokenFarm = await ethers.getContractAt("TokenFarm", TOKEN_FARM_ADDRESS);
+  const dappToken = await hre.ethers.getContractAt("DAppToken", DAPP_TOKEN_ADDRESS);
+  const lpToken = await hre.ethers.getContractAt("LPToken", LP_TOKEN_ADDRESS);
+  const tokenFarm = await hre.ethers.getContractAt("TokenFarm", TOKEN_FARM_ADDRESS);
 
-    console.log("Balance de DAppToken en TokenFarm:", ethers.formatEther(await dappToken.balanceOf(TOKEN_FARM_ADDRESS)), "DAPP");
+  console.log(`Interactuando con contratos desde la cuenta: ${deployer.address}`);
+  const deployerEthBalance = await hre.ethers.provider.getBalance(deployer.address);
+  console.log(`Balance de cuenta: ${hre.ethers.formatEther(deployerEthBalance)} ETH`);
 
-    console.log("\n--- Información inicial de la Farm ---");
-    console.log("Nombre de la Farm:", await tokenFarm.name());
-    console.log("Owner de la Farm:", await tokenFarm.owner());
-    console.log("Recompensa por bloque actual:", ethers.formatEther(await tokenFarm.rewardPerBlock()));
-    console.log("Porcentaje de comisión de retiro:", (await tokenFarm.withdrawalFeeBasisPoints()).toString(), "basis points");
+  const farmDappBalance = await dappToken.balanceOf(TOKEN_FARM_ADDRESS);
+  console.log(`Balance de DAppToken en TokenFarm: ${hre.ethers.formatEther(farmDappBalance)} DAPP`);
 
-    const depositAmount = ethers.parseEther("100");
+  console.log("\n--- Información inicial de la Farm ---");
+  console.log(`Nombre de la Farm: ${await tokenFarm.name()}`);
+  console.log(`Owner de la Farm: ${await tokenFarm.owner()}`);
+  console.log(`Recompensa por bloque actual: ${hre.ethers.formatEther(await tokenFarm.rewardPerBlock())}`);
+  console.log(`Porcentaje de comisión de retiro: ${await tokenFarm.withdrawalFeeBasisPoints()} basis points`);
 
-    console.log(`\n--- Simulación de depósito por ${deployer.address} ---`);
-    console.log(`Balance de LPT de ${deployer.address} antes de mintear: ${ethers.formatEther(await lpToken.balanceOf(deployer.address))}`);
+  console.log("\n--- Simulación de depósito por " + deployer.address + " ---");
+  const amountToStake = hre.ethers.parseEther("100");
 
-    const mintAmount = ethers.parseEther("5000");
-    console.log(`Minteando ${ethers.formatEther(mintAmount)} LPT para ${deployer.address}...`);
-    await (await lpToken.connect(deployer).mint(deployer.address, mintAmount)).wait();
-    console.log(`Balance de LPT de ${deployer.address} DESPUÉS de mintear: ${ethers.formatEther(await lpToken.balanceOf(deployer.address))}`);
+  const deployerLpBalanceBeforeMint = await lpToken.balanceOf(deployer.address);
+  console.log(`Balance de LPT de ${deployer.address} antes de mintear: ${hre.ethers.formatEther(deployerLpBalanceBeforeMint)}`);
 
-    console.log(`Aprobando ${TOKEN_FARM_ADDRESS} para gastar ${ethers.formatEther(depositAmount)} LPT de ${deployer.address}...`);
-    await (await lpToken.connect(deployer).approve(TOKEN_FARM_ADDRESS, depositAmount)).wait();
-    console.log(`Aprobación de LPT del deployer para TokenFarm: ${ethers.formatEther(await lpToken.allowance(deployer.address, TOKEN_FARM_ADDRESS))}`);
+  console.log(`Minteando ${hre.ethers.formatEther(amountToStake)} LPT para ${deployer.address}...`);
+  await (await lpToken.connect(deployer).mint(deployer.address, amountToStake)).wait();
+  const deployerLpBalanceAfterMint = await lpToken.balanceOf(deployer.address);
+  console.log(`Balance de LPT de ${deployer.address} DESPUÉS de mintear: ${hre.ethers.formatEther(deployerLpBalanceAfterMint)}`);
 
-    console.log(`Depositando ${ethers.formatEther(depositAmount)} LPT...`);
-    await (await tokenFarm.connect(deployer).deposit(depositAmount)).wait();
-    console.log(`Balance de staking de ${deployer.address}: ${ethers.formatEther((await tokenFarm.stakers(deployer.address)).stakingBalance)} LPT`);
-    console.log(`Total Staking Balance en Farm: ${ethers.formatEther(await tokenFarm.totalStakingBalance())} LPT`);
-    console.log(`Checkpoint del deployer después del depósito: ${(await tokenFarm.stakers(deployer.address)).checkpoint.toString()}`);
-    console.log(`Block number actual después del depósito: ${await ethers.provider.getBlockNumber()}`);
+  console.log(`Aprobando ${TOKEN_FARM_ADDRESS} para gastar ${hre.ethers.formatEther(amountToStake)} LPT de ${deployer.address}...`);
+  await (await lpToken.connect(deployer).approve(TOKEN_FARM_ADDRESS, amountToStake)).wait();
+  const allowance = await lpToken.allowance(deployer.address, TOKEN_FARM_ADDRESS);
+  console.log(`Aprobación de LPT del deployer para TokenFarm: ${hre.ethers.formatEther(allowance)}`);
 
-    console.log("\n--- Avanzando bloques para acumular recompensas... ---");
-    console.log("Esperando 10 segundos para que se minen algunos bloques en Sepolia...");
-    await new Promise(resolve => setTimeout(resolve, 10000));
-    console.log(`Block number después de la espera: ${await ethers.provider.getBlockNumber()}`);
+  console.log(`Depositando ${hre.ethers.formatEther(amountToStake)} LPT...`);
+  await (await tokenFarm.connect(deployer).deposit(amountToStake)).wait();
+  const deployerStakingBalance = await tokenFarm.stakers(deployer.address);
+  console.log(`Balance de staking de ${deployer.address}: ${hre.ethers.formatEther(deployerStakingBalance.stakingBalance)} LPT`);
+  console.log(`Total Staking Balance en Farm: ${hre.ethers.formatEther(await tokenFarm.totalStakingBalance())} LPT`);
+  console.log(`Reward Debt del deployer después del depósito: ${hre.ethers.formatEther(deployerStakingBalance.rewardDebt)}`);
 
-    console.log("\n--- Llamando a distributeRewardsAll para forzar el cálculo de recompensas ---");
-    await (await tokenFarm.connect(deployer).distributeRewardsAll()).wait();
+  console.log("\n--- Avanzando bloques para acumular recompensas... ---");
+  console.log("Esperando 10 segundos para que se minen algunos bloques en Sepolia...");
+  await new Promise(resolve => setTimeout(resolve, 10000));
 
-    console.log(`Recompensas pendientes para ${deployer.address} DESPUÉS DE DISTRIBUTE_ALL: ${ethers.formatEther((await tokenFarm.stakers(deployer.address)).pendingRewards)} DAPP`);
+  const pendingRewardsBeforeClaim = await tokenFarm.getPendingRewards(deployer.address);
+  console.log(`Recompensas pendientes para ${deployer.address} ANTES de reclamar: ${hre.ethers.formatEther(pendingRewardsBeforeClaim)} DAPP`);
 
-    console.log(`\n--- Simulación de reclamar recompensas por ${deployer.address} ---`);
-    const initialDeployerDappBalanceForClaim = await dappToken.balanceOf(deployer.address);
-    await (await tokenFarm.connect(deployer).claimRewards()).wait();
-    const finalDeployerDappBalanceForClaim = await dappToken.balanceOf(deployer.address);
-    console.log(`Recompensas recibidas por ${deployer.address}: ${ethers.formatEther(finalDeployerDappBalanceForClaim - initialDeployerDappBalanceForClaim)} DAPP`);
-    console.log(`Fees acumulados en la Farm: ${ethers.formatEther(await tokenFarm.accumulatedFees())} DAPP`);
+  console.log("\n--- Simulación de reclamar recompensas por " + deployer.address + " ---");
+  const dappBalanceBeforeClaim = await dappToken.balanceOf(deployer.address);
+  await (await tokenFarm.connect(deployer).claimRewards()).wait();
+  const dappBalanceAfterClaim = await dappToken.balanceOf(deployer.address);
+  const rewardsReceived = dappBalanceAfterClaim - dappBalanceBeforeClaim;
+  console.log(`Recompensas recibidas por ${deployer.address}: ${hre.ethers.formatEther(rewardsReceived)} DAPP`);
+  console.log(`Fees acumulados en la Farm: ${hre.ethers.formatEther(await tokenFarm.accumulatedFees())} DAPP`);
 
-    console.log(`\n--- Simulación de retiro de fees por el owner (${deployer.address}) ---`);
-    const initialDeployerDappBalanceAfterClaim = await dappToken.balanceOf(deployer.address);
-    const feesBeforeWithdraw = await tokenFarm.accumulatedFees();
+  console.log("\n--- Simulación de retiro de fees por el owner (" + deployer.address + ") ---");
+  const ownerDappBalanceBeforeWithdrawFees = await dappToken.balanceOf(deployer.address);
+  const accumulatedFeesBeforeWithdraw = await tokenFarm.accumulatedFees();
+  await (await tokenFarm.connect(deployer).withdrawFees()).wait();
+  const ownerDappBalanceAfterWithdrawFees = await dappToken.balanceOf(deployer.address);
+  const feesWithdrawn = ownerDappBalanceAfterWithdrawFees - ownerDappBalanceBeforeWithdrawFees;
+  console.log(`Fees retirados por el owner: ${hre.ethers.formatEther(feesWithdrawn)} DAPP`);
 
-    if (feesBeforeWithdraw > 0) {
-        await (await tokenFarm.connect(deployer).withdrawFees()).wait();
-    } else {
-        console.log("No hay fees acumulados para retirar.");
-    }
+  console.log("\n--- Simulación de retiro de LP por " + deployer.address + " ---");
+  const deployerLpBalanceBeforeWithdraw = await lpToken.balanceOf(deployer.address);
+  await (await tokenFarm.connect(deployer).withdraw()).wait();
+  const deployerLpBalanceAfterWithdraw = await lpToken.balanceOf(deployer.address);
+  const lpWithdrawn = deployerLpBalanceAfterWithdraw - deployerLpBalanceBeforeWithdraw;
+  console.log(`LP Tokens retirados por ${deployer.address}: ${hre.ethers.formatEther(lpWithdrawn)} LPT`);
+  console.log(`Total Staking Balance en Farm: ${hre.ethers.formatEther(await tokenFarm.totalStakingBalance())} LPT`);
 
-    const finalDeployerDappBalanceAfterFeeWithdraw = await dappToken.balanceOf(deployer.address);
-    console.log(`Fees retirados por el owner: ${ethers.formatEther(finalDeployerDappBalanceAfterFeeWithdraw - initialDeployerDappBalanceAfterClaim)} DAPP`);
-
-    console.log(`\n--- Simulación de retiro de LP por ${deployer.address} ---`);
-    const initialDeployerLpBalance = await lpToken.balanceOf(deployer.address);
-    await (await tokenFarm.connect(deployer).withdraw()).wait();
-    const finalDeployerLpBalance = await lpToken.balanceOf(deployer.address);
-
-    console.log(`LP Tokens retirados por ${deployer.address}: ${ethers.formatEther(finalDeployerLpBalance - initialDeployerLpBalance)} LPT`);
-    console.log(`Total Staking Balance en Farm: ${ethers.formatEther(await tokenFarm.totalStakingBalance())} LPT`);
-
-    console.log("\n¡Interacción completada!");
+  console.log("\n¡Interacción completada!");
 }
 
-main()
-    .then(() => process.exit(0))
-    .catch((error) => {
-        console.error(error);
-        process.exit(1);
-    });
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
